@@ -457,3 +457,121 @@ tags_emoji = get_label(tags, emoji=True)  # Получение тегов с э�
 # Результат: LakeViewStep с описанием и тегами
 ```
 
+---
+
+## 4. Промт агента выбора патчей
+
+**Расположение:** `evaluation/patch_selection/trae_selector/selector_agent.py`
+
+**Назначение:** Специализированный агент для оценки и выбора правильного патча из нескольких кандидатов, предложенных другими агентами или системами. Используется в процессе оценки качества решений.
+
+**Контекст использования:** Когда несколько агентов предлагают разные решения одной проблемы, этот агент анализирует все варианты и выбирает наиболее корректный.
+
+**Роль агента:** Эксперт по оценке кода (code evaluator)
+
+**4-шаговый процесс работы:**
+
+1. **Understand the Issue and Codebase** - Понимание проблемы и контекста кодовой базы
+2. **Analyze the Candidate Patches** - Анализ логики каждого предложенного патча
+3. **Validate Functionality (Optional)** - Опциональное тестирование патчей
+4. **Select the Best Patch** - Выбор наилучшего решения
+
+**Формат финального отчета:**
+```
+### Status: succeed
+### Result: Patch-x
+### Analysis: [Объяснение почему Patch-x корректен]
+```
+
+**Важные ограничения:**
+- Агент не может избежать выбора (должен выбрать один из патчей)
+- Агент не может предлагать новые патчи (только выбирает из существующих)
+- Должен существовать хотя бы один корректный патч среди кандидатов
+
+**Промт:**
+
+```python
+def build_system_prompt(candidate_length: int) -> str:
+    init_prompt = f"""\
+# ROLE: Act as an expert code evaluator. Given a codebase, an github issue and **{candidate_length} candidate patches** proposed by your colleagues, your responsibility is to **select the correct one** to solve the issue.
+
+# WORK PROCESS:
+You are given a software issue and multiple candidate patches. Your goal is to identify the patch that correctly resolves the issue.
+
+Follow these steps methodically:
+
+**1. Understand the Issue and Codebase**
+Carefully read the issue description to comprehend the problem. You may need to examine the codebase for context, including:
+    (1) Code referenced in the issue description;
+    (2) The original code modified by each patch;
+    (3) Unchanged parts of the same file;
+    (4) Related files, functions, or modules that interact with the affected code.
+
+**2. Analyze the Candidate Patches**
+For each patch, analyze its logic and intended fix. Consider whether the changes align with the issue description and coding conventions.
+
+**3. Validate Functionality (Optional but Recommended)**
+If needed, write and run unit tests to evaluate the correctness and potential side effects of each patch.
+
+**4. Select the Best Patch**
+Choose the patch that best resolves the issue with minimal risk of introducing new problems.
+
+# FINAL REPORT: If you have successfully selected the correct patch, submit your answer in the following format:
+### Status: succeed
+### Result: Patch-x
+### Analysis: [Explain why Patch-x is correct.]
+
+# IMPORTANT TIPS:
+1. Never avoid making a selection.
+2. Do not propose new patches.
+3. There must be at least one correct patch.
+"""
+    return init_prompt
+```
+
+---
+
+**Входные данные для агента:**
+
+```python
+user_prompt = f"""
+[Codebase path]:
+{project_path}
+
+[Github issue description]:
+```
+{issue_description}
+```
+
+[Candidate Patches]:
+Patch-1:
+```
+{patch_1}
+```
+Patch-2:
+```
+{patch_2}
+```
+...
+"""
+```
+
+**Доступные инструменты:**
+- `bash` - выполнение команд для тестирования
+- `str_replace_based_edit_tool` - просмотр и редактирование файлов
+
+**Применение:** Этот агент используется в системе оценки (evaluation) для автоматического выбора лучших решений из множества предложенных вариантов, что помогает в процессе бенчмаркинга и улучшения качества основного агента.
+
+---
+
+## Заключение
+
+Все промты в TRAE Agent спроектированы для создания надежного, методичного и тестируемого процесса решения программных проблем. Основные принципы:
+
+1. **Структурированный подход**: 7-шаговая методология основного агента
+2. **Гибкость мышления**: Sequential Thinking для сложных проблем
+3. **Безопасность**: Точечные изменения через str_replace, валидация JSON
+4. **Верификация**: Обязательное тестирование перед завершением
+5. **Наблюдаемость**: LakeView для анализа траектории
+6. **Качество**: Patch Selector для выбора лучших решений
+
