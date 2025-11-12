@@ -175,3 +175,178 @@ You should:
 11. Only set next_thought_needed to false when truly done and a satisfactory answer is reached"""
 ```
 
+---
+
+### 2.2. Text Editor Tool
+
+**Расположение:** `trae_agent/tools/edit_tool.py`
+
+**Назначение:** Инструмент для просмотра, создания и редактирования файлов в кодовой базе. Поддерживает точечные изменения через замену строк (str_replace), что минимизирует риск ошибок при редактировании.
+
+**Основные команды:**
+- `view` - просмотр содержимого файла или директории
+- `create` - создание нового файла
+- `str_replace` - замена строк в файле (основной способ редактирования)
+- `insert` - вставка новых строк в указанную позицию
+
+**Важные особенности:**
+- Требуется абсолютный путь к файлу
+- `old_str` должен точно совпадать с содержимым файла (включая пробелы)
+- `old_str` должен быть уникальным в файле
+- Состояние персистентно между вызовами
+
+**Промт:**
+
+```python
+def get_description(self) -> str:
+    return """Custom editing tool for viewing, creating and editing files
+* State is persistent across command calls and discussions with the user
+* If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep
+* The `create` command cannot be used if the specified `path` already exists as a file !!! If you know that the `path` already exists, please remove it first and then perform the `create` operation!
+* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`
+
+Notes for using the `str_replace` command:
+* The `old_str` parameter should match EXACTLY one or more consecutive lines from the original file. Be mindful of whitespaces!
+* If the `old_str` parameter is not unique in the file, the replacement will not be performed. Make sure to include enough context in `old_str` to make it unique
+* The `new_str` parameter should contain the edited lines that should replace the `old_str`
+"""
+```
+
+---
+
+### 2.3. Bash Tool
+
+**Расположение:** `trae_agent/tools/bash_tool.py`
+
+**Назначение:** Инструмент для выполнения bash команд в персистентной shell-сессии. Позволяет агенту запускать тесты, скрипты, устанавливать пакеты и выполнять другие системные операции.
+
+**Ключевые возможности:**
+- Выполнение произвольных bash команд
+- Персистентное состояние между вызовами
+- Доступ к linux и python пакетам через apt и pip
+- Возможность перезапуска сессии
+
+**Важные ограничения:**
+- Избегать команд с очень большим выводом
+- Долгоживущие команды запускать в фоне
+- Timeout для команд (по умолчанию 120 секунд)
+
+**Промт:**
+
+```python
+def get_description(self) -> str:
+    return """Run commands in a bash shell
+* When invoking this tool, the contents of the "command" parameter does NOT need to be XML-escaped.
+* You have access to a mirror of common linux and python packages via apt and pip.
+* State is persistent across command calls and discussions with the user.
+* To inspect a particular line range of a file, e.g. lines 10-25, try 'sed -n 10,25p /path/to/the/file'.
+* Please avoid commands that may produce a very large amount of output.
+* Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background.
+"""
+```
+
+---
+
+### 2.4. JSON Edit Tool
+
+**Расположение:** `trae_agent/tools/json_edit_tool.py`
+
+**Назначение:** Специализированный инструмент для безопасного редактирования JSON файлов с использованием JSONPath выражений. Позволяет точечно изменять структуры данных без риска повреждения всего файла.
+
+**Операции:**
+- `view` - просмотр JSON содержимого или конкретных путей
+- `set` - обновление существующих значений
+- `add` - добавление новых ключей (для объектов) или элементов (для массивов)
+- `remove` - удаление элементов
+
+**JSONPath синтаксис:**
+- `$` - корневой элемент
+- `.key` - доступ к свойству объекта
+- `[index]` - доступ к индексу массива
+- `[*]` - все элементы массива/объекта
+- `..key` - рекурсивный поиск ключа
+- `[start:end]` - срез массива
+
+**Промт:**
+
+```python
+def get_description(self) -> str:
+    return """Tool for editing JSON files with JSONPath expressions
+* Supports targeted modifications to JSON structures using JSONPath syntax
+* Operations: view, set, add, remove
+* JSONPath examples: '$.users[0].name', '$.config.database.host', '$.items[*].price'
+* Safe JSON parsing and validation with detailed error messages
+* Preserves JSON formatting where possible
+
+Operation details:
+- `view`: Display JSON content or specific paths
+- `set`: Update existing values at specified paths
+- `add`: Add new key-value pairs (for objects) or append to arrays
+- `remove`: Delete elements at specified paths
+
+JSONPath syntax supported:
+- `$` - root element
+- `.key` - object property access
+- `[index]` - array index access
+- `[*]` - all elements in array/object
+- `..key` - recursive descent (find key at any level)
+- `[start:end]` - array slicing
+"""
+```
+
+---
+
+### 2.5. Code Knowledge Graph (CKG) Tool
+
+**Расположение:** `trae_agent/tools/ckg_tool.py`
+
+**Назначение:** Инструмент для построения и запроса графа знаний кодовой базы. Позволяет быстро находить определения функций, классов и методов без необходимости поиска по всем файлам.
+
+**Команды:**
+- `search_function` - поиск функций по имени
+- `search_class` - поиск классов по имени
+- `search_class_method` - поиск методов классов
+
+**Возвращаемая информация:**
+- Путь к файлу и номера строк
+- Тело функции/класса (опционально)
+- Для классов: список полей и методов
+
+**Ограничения:**
+- CKG не полностью точен и может не найти все функции/классы
+- Вывод может быть обрезан при большом количестве результатов
+- Состояние персистентно между вызовами
+
+**Промт:**
+
+```python
+def get_description(self) -> str:
+    return """Query the code knowledge graph of a codebase.
+* State is persistent across command calls and discussions with the user
+* The `search_function` command searches for functions in the codebase
+* The `search_class` command searches for classes in the codebase
+* The `search_class_method` command searches for class methods in the codebase
+* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`
+* If multiple entries are found, the tool will return all of them until the truncation is reached.
+* By default, the tool will print function or class bodies as well as the file path and line number of the function or class. You can disable this by setting the `print_body` parameter to `false`.
+* The CKG is not completely accurate, and may not be able to find all functions or classes in the codebase.
+"""
+```
+
+---
+
+### 2.6. Task Done Tool
+
+**Расположение:** `trae_agent/tools/task_done_tool.py`
+
+**Назначение:** Инструмент для сигнализации о завершении задачи. Агент должен вызвать этот инструмент только после того, как проблема полностью решена и верифицирована.
+
+**Важное требование:** Нельзя вызывать этот инструмент до проведения верификации решения (запуск тестов, воспроизводящих скриптов и т.д.).
+
+**Промт:**
+
+```python
+def get_description(self) -> str:
+    return "Report the completion of the task. Note that you cannot call this tool before any verification is done. You can write reproduce / test script to verify your solution."
+```
+
