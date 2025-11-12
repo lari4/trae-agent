@@ -350,3 +350,110 @@ def get_description(self) -> str:
     return "Report the completion of the task. Note that you cannot call this tool before any verification is done. You can write reproduce / test script to verify your solution."
 ```
 
+---
+
+## 3. Промты анализа траектории (LakeView)
+
+**Расположение:** `trae_agent/utils/lake_view.py`
+
+**Назначение:** Система LakeView предназначена для анализа и визуализации траектории работы агента. Она использует два специальных промта для извлечения информации о действиях агента на каждом шаге и их категоризации.
+
+### 3.1. EXTRACTOR_PROMPT - Извлечение задачи на текущем шаге
+
+**Назначение:** Определяет, какую задачу выполняет агент на конкретном шаге траектории. Анализирует контекст предыдущего и текущего шага для формирования краткого описания.
+
+**Формат вывода:** Две гранулярности описания
+- `<task>` - краткое общее описание (максимум 10 слов, без деталей конкретного бага)
+- `<details>` - дополнительные детали с учетом специфики бага (максимум 30 слов)
+
+**Примеры использования:**
+- Агент пишет скрипт воспроизведения → `<task>The agent is writing a reproduction test script.</task>`
+- Агент ищет функцию в коде → `<task>The agent is examining source code.</task>`
+- Агент исправляет тестовый скрипт → `<task>The agent is fixing the reproduction test script.</task>`
+
+**Промт:**
+
+```python
+EXTRACTOR_PROMPT = """
+Given the preceding excerpt, your job is to determine "what task is the agent performing in <this_step>".
+Output your answer in two granularities: <task>...</task><details>...</details>.
+In the <task> tag, the answer should be concise and general. It should omit ANY bug-specific details, and contain at most 10 words.
+In the <details> tag, the answer should complement the <task> tag by adding bug-specific details. It should be informative and contain at most 30 words.
+
+Examples:
+
+<task>The agent is writing a reproduction test script.</task><details>The agent is writing "test_bug.py" to reproduce the bug in XXX-Project's create_foo method not comparing sizes correctly.</details>
+<task>The agent is examining source code.</task><details>The agent is searching for "function_name" in the code repository, that is related to the "foo.py:function_name" line in the stack trace.</details>
+<task>The agent is fixing the reproduction test script.</task><details>The agent is fixing "test_bug.py" that forgets to import the function "foo", causing a NameError.</details>
+
+Now, answer the question "what task is the agent performing in <this_step>".
+Again, provide only the answer with no other commentary. The format should be "<task>...</task><details>...</details>".
+"""
+```
+
+---
+
+### 3.2. TAGGER_PROMPT - Категоризация действий агента
+
+**Назначение:** Присваивает теги (метки) действиям агента для категоризации типов выполняемых операций. Позволяет отслеживать, на каком этапе решения проблемы находится агент.
+
+**Доступные теги:**
+- `WRITE_TEST` - написание или исправление тестового скрипта для воспроизведения бага
+- `VERIFY_TEST` - запуск скрипта воспроизведения для проверки окружения
+- `EXAMINE_CODE` - просмотр, поиск или исследование кода для понимания причины бага
+- `WRITE_FIX` - модификация исходного кода для исправления бага
+- `VERIFY_FIX` - запуск тестов для верификации исправления
+- `REPORT` - отчет пользователю о завершении или прогрессе
+- `THINK` - анализ проблемы через размышление без конкретных действий
+- `OUTLIER` - действие не подходит ни под один тег (например, установка зависимостей)
+
+**Особенности:**
+- Можно выбрать несколько тегов для одного шага (через запятую)
+- Теги визуализируются с эмодзи: ☑️ (WRITE_TEST), ✅ (VERIFY_TEST), 👁️ (EXAMINE_CODE), 📝 (WRITE_FIX), 🔥 (VERIFY_FIX), 📣 (REPORT), 🧠 (THINK), ⁉️ (OUTLIER)
+
+**Промт:**
+
+```python
+TAGGER_PROMPT = """
+Given the trajectory, your job is to determine "what task is the agent performing in the current step".
+Output your answer by choosing the applicable tags in the below list for the current step.
+If it is performing multiple tasks in one step, choose ALL applicable tags, separated by a comma.
+
+<tags>
+WRITE_TEST: It writes a test script to reproduce the bug, or modifies a non-working test script to fix problems found in testing.
+VERIFY_TEST: It runs the reproduction test script to verify the testing environment is working.
+EXAMINE_CODE: It views, searches, or explores the code repository to understand the cause of the bug.
+WRITE_FIX: It modifies the source code to fix the identified bug.
+VERIFY_FIX: It runs the reproduction test or existing tests to verify the fix indeed solves the bug.
+REPORT: It reports to the user that the job is completed or some progress has been made.
+THINK: It analyzes the bug through thinking, but does not perform concrete actions right now.
+OUTLIER: A major part in this step does not fit into any tag above, such as running a shell command to install dependencies.
+</tags>
+
+<examples>
+If the agent is opening a file to examine, output <tags>EXAMINE_CODE</tags>.
+If the agent is fixing a known problem in the reproduction test script and then running it again, output <tags>WRITE_TEST,VERIFY_TEST</tags>.
+If the agent is merely thinking about the root cause of the bug without other actions, output <tags>THINK</tags>.
+</examples>
+
+Output only the tags with no other commentary. The format should be <tags>...</tags>
+"""
+```
+
+---
+
+**Использование в коде:**
+
+LakeView промты используются для создания отчетов о работе агента:
+
+```python
+# Создание описания шага
+desc_task, desc_details = await extract_task_in_step(prev_step, this_step)
+
+# Присвоение тегов
+tags = await extract_tag_in_step(this_step)
+tags_emoji = get_label(tags, emoji=True)  # Получение тегов с эмодзи
+
+# Результат: LakeViewStep с описанием и тегами
+```
+
